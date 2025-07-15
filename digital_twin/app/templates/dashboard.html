@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block title %}CNC Digital Twin - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-tachometer-alt"></i> Machine {{ machine_id }} Dashboard</h2>
+        <div class="alert alert-info" id="last-updated">
+            Last updated: <span id="update-time">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<!-- Status Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <h5><i class="fas fa-power-off"></i> Status</h5>
+                <h3 id="machine-status">Loading...</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h5><i class="fas fa-clock"></i> Total Cutting Time</h5>
+                <h3 id="total-cutting-time">Loading...</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <h5><i class="fas fa-percentage"></i> Efficiency</h5>
+                <h3 id="efficiency">Loading...</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body">
+                <h5><i class="fas fa-chart-bar"></i> Utilization</h5>
+                <h3 id="utilization">Loading...</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-chart-line"></i> Cutting Time Trend</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="cutting-time-chart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-tachometer-alt"></i> Spindle Speed</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="spindle-speed-chart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Maintenance and Anomalies -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-wrench"></i> Maintenance Prediction</h5>
+            </div>
+            <div class="card-body" id="maintenance-info">
+                Loading...
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-exclamation-triangle"></i> Recent Anomalies</h5>
+            </div>
+            <div class="card-body" id="anomalies-info">
+                Loading...
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const machineId = '{{ machine_id }}';
+let cuttingTimeChart, spindleSpeedChart;
+
+async function loadDashboardData() {
+    try {
+        const response = await fetch(`/api/twin/${machineId}`);
+        const data = await response.json();
+        
+        // Update status cards
+        document.getElementById('machine-status').textContent = data.status.status.toUpperCase();
+        document.getElementById('total-cutting-time').textContent = 
+            (data.metrics.total_cutting_time || 0).toFixed(2) + 's';
+        document.getElementById('efficiency').textContent = 
+            (data.metrics.efficiency || 0).toFixed(1) + '%';
+        document.getElementById('utilization').textContent = 
+            (data.metrics.utilization || 0).toFixed(1) + '%';
+        document.getElementById('update-time').textContent = 
+            new Date(data.last_updated).toLocaleString();
+        
+        // Update charts
+        updateCharts(data.time_series);
+        
+        // Update maintenance info
+        updateMaintenanceInfo(data.maintenance_prediction);
+        
+        // Update anomalies
+        updateAnomalies(data.anomalies);
+        
+    } catch (error) {
+        console.error('Error loading dashboard data:', error);
+    }
+}
+
+function updateCharts(timeSeries) {
+    const ctx1 = document.getElementById('cutting-time-chart').getContext('2d');
+    const ctx2 = document.getElementById('spindle-speed-chart').getContext('2d');
+    
+    if (cuttingTimeChart) cuttingTimeChart.destroy();
+    if (spindleSpeedChart) spindleSpeedChart.destroy();
+    
+    cuttingTimeChart = new Chart(ctx1, {
+        type: 'line',
+        data: {
+            labels: timeSeries.timestamps.map(t => new Date(t).toLocaleTimeString()),
+            datasets: [{
+                label: 'Cutting Time (s)',
+                data: timeSeries.cutting_times,
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+    
+    spindleSpeedChart = new Chart(ctx2, {
+        type: 'line',
+        data: {
+            labels: timeSeries.timestamps.map(t => new Date(t).toLocaleTimeString()),
+            datasets: [{
+                label: 'Spindle Speed (RPM)',
+                data: timeSeries.spindle_speeds,
+                borderColor: 'rgb(255, 99, 132)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
+function updateMaintenanceInfo(prediction) {
+    const container = document.getElementById('maintenance-info');
+    const confidenceColor = prediction.confidence > 70 ? 'success' : 
+                           prediction.confidence > 40 ? 'warning' : 'danger';
+    
+    container.innerHTML = `
+        <h6>${prediction.prediction}</h6>
+        <div class="progress mb-2">
+            <div class="progress-bar bg-${confidenceColor}" style="width: ${prediction.confidence}%">
+                ${prediction.confidence}% Confidence
+            </div>
+        </div>
+        <small class="text-muted">${prediction.reason}</small>
+    `;
+}
+
+function updateAnomalies(anomalies)
